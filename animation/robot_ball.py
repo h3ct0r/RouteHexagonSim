@@ -5,6 +5,7 @@ from hexagon import Hexagon
 import math_helper
 import re
 import numpy as np
+from scipy.spatial import distance
 
 __author__ = 'Hector Azpurua'
 
@@ -16,15 +17,28 @@ class RobotBall(object):
     STATUS_WAITING = 'WAITING'
     STATUS_DAMAGED = 'DAMAGED'
     STATUS_GOING_HOME = 'GOING_HOME'
+    STATUS_GOING_TO_ROUTE = 'GOING_TO_ROUTE'
+    STATUS_GOING_TO_NEXT_HEX = 'GOING_TO_NEXT_HEX'
+    STATUS_ENDING = 'ENDING'
 
     def __init__(self, robot_id, hex_internal_list, hex_external_list, ball, hist_curve,
-                 np_file='/tmp/magnetic_ground_truth.np', height=40, debug=False):
+                 np_file='/tmp/magnetic_ground_truth.np', height=40, battery=4000, debug=True):
         self.robot_id = robot_id
         self.debug = debug
-        self.status = 'START'
+        self.status = 'GOING_TO_NEXT_HEX'
         self.hex_index = 0
+        self.base_battery = battery
+        self.battery = self.base_battery
+
+        self.movement_mode = 1
+        self.max_delta = 10
+        self.step_p = 0.6  # 0.06
+        self.ball = ball
 
         self.np_file = np_file
+        np_mat = np.loadtxt(self.np_file)
+        np_mat *= 255.0/np_mat.max()
+        self.np_mat = np_mat
 
         self.height = height
 
@@ -37,25 +51,28 @@ class RobotBall(object):
 
         self.hex_internal_list = hex_internal_list
 
-        self.movement_mode = 0
-        self.max_delta = 10
-        self.step_p = 0.6  # 0.06
-        self.ball = ball
-
-        self.msg = 'NORMAL'
-
         self.hist_curve = hist_curve
         self.last_position = [
-            ball.x,
             ball.y,
+            ball.x,
             ball.z
         ]
 
+        self.print_message("Starting pos: {0} {1} {2}".format(ball.x, ball.y, ball.z))
+
         self.home_position = self.last_position
+        self.home_route = []
+        self.return_to_route = []
 
         self.history = []
-
         self.wp_index = 0
+
+        # Define first route to reach hexagon
+        next_wp = self.hex_internal_list[self.hex_index][self.wp_index]
+        go_next_wp = math_helper.get_line_points(self.last_position, next_wp, step=20)
+        go_next_wp_3d = math_helper.get_3d_coverage_points(
+            go_next_wp, self.height, self.np_file, np_mat=self.np_mat)
+        self.next_hexagon_route = go_next_wp_3d
         pass
 
     def update_visit_point_list_using_self_hexagons(self):
@@ -66,12 +83,74 @@ class RobotBall(object):
 
         self.print_message("Hex internal list: {0}".format(self.hex_internal_list))
 
+    def check_need_to_go_home(self):
+        curr_wp = self.hex_internal_list[self.hex_index][self.wp_index]
+        next_wp = None
+        if self.wp_index + 1 < len(self.hex_internal_list[self.hex_index]):
+            next_wp = self.hex_internal_list[self.hex_index][self.wp_index + 1]
+        else:
+            if self.hex_index + 1 < len(self.hex_internal_list):
+                next_wp = self.hex_internal_list[self.hex_index + 1][0]
+
+        curr_wp_2d = (curr_wp[0], curr_wp[1])
+        home_2d = (self.home_position[0], self.home_position[1])
+        go_home_route = math_helper.get_line_points(curr_wp_2d, home_2d, step=20)
+        go_home_route_3d = math_helper.get_3d_coverage_points(
+            go_home_route, self.height, self.np_file, np_mat=self.np_mat)
+
+        if next_wp is None:
+            self.status = RobotBall.STATUS_ENDING
+            self.home_route = go_home_route_3d
+            self.print_message("Ending!")
+            return True
+
+        next_wp_dst = distance.euclidean(curr_wp, next_wp)
+        next_wp_2d = (next_wp[0], next_wp[1])
+
+        home_dst = math_helper.get_distance_3d_path(go_home_route_3d)
+        home_dst += home_dst * 0.1  # To address the error in the distance calculus
+
+        go_home_next_wp_route = math_helper.get_line_points(next_wp_2d, home_2d, step=20)
+        go_home_next_wp_route_3d = math_helper.get_3d_coverage_points(
+            go_home_next_wp_route, self.height, self.np_file, np_mat=self.np_mat)
+        home_next_wp_dst = math_helper.get_distance_3d_path(go_home_next_wp_route_3d)
+        home_next_wp_dst += home_next_wp_dst * 0.1  # To address the error in the distance calculus
+
+        if next_wp_dst + home_dst >= self.battery or next_wp_dst + home_next_wp_dst >= self.battery:
+            self.status = RobotBall.STATUS_GOING_HOME
+            self.home_route = go_home_route_3d
+            self.return_to_route = go_home_route_3d[::-1]
+            self.print_message("Going home!")
+            return True
+
+        return False
+
     def update_pos(self):
 
         if self.status == RobotBall.STATUS_END or self.status == RobotBall.STATUS_DAMAGED:
+            self.print_message("End status!")
             return
 
-        curr_wp = self.hex_internal_list[self.hex_index][self.wp_index]
+        if self.battery <= 0:
+            self.status = RobotBall.STATUS_END
+            self.print_message("No battery!")
+            return
+
+        if self.status == RobotBall.STATUS_GOING_HOME or self.status == RobotBall.STATUS_ENDING:
+            curr_wp = self.home_route[0]
+            self.print_message("Going to home!")
+        elif self.status == RobotBall.STATUS_GOING_TO_NEXT_HEX:
+            curr_wp = self.next_hexagon_route[0]
+            self.print_message("Going to next hexagon!")
+        elif self.status == RobotBall.STATUS_GOING_TO_ROUTE:
+            curr_wp = self.return_to_route[0]
+            self.print_message("Going to route!")
+        else:
+            curr_wp = self.hex_internal_list[self.hex_index][self.wp_index]
+            if self.check_need_to_go_home():
+                self.print_message("Need to go home!")
+                return
+
         ball_pos = self.ball.pos.tolist()
 
         if self.debug:
@@ -86,7 +165,7 @@ class RobotBall(object):
             arr = visual.vector(float(bx), float(by), float(bz))
             self.history.append(arr)
 
-            if len(self.history) > 10:
+            if len(self.history) > 2:
                 self.hist_curve.extend(self.history)
                 self.history[:] = []
 
@@ -107,8 +186,8 @@ class RobotBall(object):
                 self.ball.y += dy * err
                 self.ball.z += dz * err
             else:
-                err = 0.06
-                lim = 1.5
+                err = self.step_p
+                lim = 10
 
                 ddx = dx * err
                 ddy = dy * err
@@ -138,22 +217,72 @@ class RobotBall(object):
                 else:
                     self.ball.z += ddz
         else:
-            if self.wp_index + 1 < len(self.hex_internal_list[self.hex_index]):
-                self.wp_index += 1
-            else:
-                self.wp_index = 0
-                if self.hex_index + 1 < len(self.hex_internal_list):
-                    self.hex_index += 1
-
-                    self.print_message("Increment index hexagon {0} of {1}".format(
-                        self.hex_index, len(self.hex_internal_list) - 1))
+            if self.status == RobotBall.STATUS_GOING_HOME:
+                if len(self.home_route) > 1:
+                    self.home_route.pop(0)
                 else:
-                    self.hex_index = 0
+                    self.status = RobotBall.STATUS_GOING_TO_ROUTE
+                    self.battery = self.base_battery
+                    self.print_message("Battery reloaded: {0}".format(self.battery))
+            elif self.status == RobotBall.STATUS_GOING_TO_ROUTE:
+                if len(self.return_to_route) > 1:
+                    self.return_to_route.pop(0)
+                else:
+                    self.status = RobotBall.STATUS_START
+                    self.print_message("Starting route again...")
+            elif self.status == RobotBall.STATUS_GOING_TO_NEXT_HEX:
+                if len(self.next_hexagon_route) > 1:
+                    self.next_hexagon_route.pop(0)
+                else:
+                    self.status = RobotBall.STATUS_START
+                    self.print_message("Starting new hex...")
+            elif self.status == RobotBall.STATUS_ENDING:
+                if len(self.home_route) > 1:
+                    self.home_route.pop(0)
+                else:
                     self.status = RobotBall.STATUS_END
+                    self.print_message("Ended!")
+            else:
+                self.print_message("WP reached")
+                if self.wp_index + 1 < len(self.hex_internal_list[self.hex_index]):
+                    self.print_message("Added one to index {0} {1}".format(
+                        self.wp_index+1, len(self.hex_internal_list[self.hex_index])))
+                    self.wp_index += 1
+                else:
+                    self.wp_index = 0
+                    if self.hex_index + 1 < len(self.hex_internal_list):
+                        self.hex_index += 1
+
+                        self.print_message("Increment index hexagon {0} of {1}".format(
+                            self.hex_index, len(self.hex_internal_list) - 1))
+
+                        self.status = RobotBall.STATUS_GOING_TO_NEXT_HEX
+                        next_wp = self.hex_internal_list[self.hex_index][self.wp_index]
+                        next_hex_route = math_helper.get_line_points(curr_wp, next_wp, step=20)
+                        if len(next_hex_route) > 0:
+                            go_hex_route = math_helper.get_3d_coverage_points(
+                                next_hex_route, self.height, self.np_file, np_mat=self.np_mat)
+                            self.next_hexagon_route = go_hex_route
+                        else:
+                            self.next_hexagon_route = [next_wp]
+                        self.print_message("Hexagon route: {0}".format(self.next_hexagon_route))
+                    else:
+                        self.print_message("Ending")
+                        self.hex_index = 0
+                        self.status = RobotBall.STATUS_END
+
+        battery_spent = distance.euclidean(self.last_position, self.ball.pos.tolist())
+
+        # self.print_message("Compare pos: {0} of {1} is {2}".format(
+        #                     self.last_position, self.ball.pos.tolist(), battery_spent))
+
+        self.battery -= battery_spent
+        self.print_message("Battery level {0} of {1}".format(
+                            self.battery, self.base_battery))
         pass
 
     def optimize_hexagon_visit(self):
-        # TODO: Fix this code and make it more readable and ObjecT Oriented :(
+        # TODO: Fix this code and make it more readable and Object Oriented :(
 
         self.print_message("Optimizing hexagon angles...")
 
@@ -342,7 +471,7 @@ class RobotBall(object):
         return ord(char) - ascii_offset
 
     def print_message(self, msg):
-        print "ID:" + str(self.robot_id) + ")", msg
+        print "ID:" + str(self.robot_id) + "/" + self.status + ")", msg
 
     def add_hex_list(self, new_hex_list):
         starting_index = len(self.hex_internal_list.keys())
