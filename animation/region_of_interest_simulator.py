@@ -45,13 +45,13 @@ class RoiSimulator(object):
             ball = visual.sphere(color=color_black, radius=RoiSimulator.ball_radius)
             wp = self.wp_list[i]
 
-            ball.x = wp[0]
-            ball.y = wp[1]
+            ball.x = wp[1]
+            ball.y = wp[0]
             ball.z = wp[2]
 
             self.balls.append(ball)
 
-            arr = visual.vector(float(wp[0]), float(wp[1]), float(wp[2]))
+            arr = visual.vector(float(wp[1]), float(wp[0]), float(wp[2]))
             hist_pos.append(arr)
 
         wp_curve.extend(hist_pos)

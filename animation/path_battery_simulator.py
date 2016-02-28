@@ -198,12 +198,15 @@ class PathBatterySimulator(object):
     curve_radius = 4
 
     def __init__(self, hex_list, np_file='/tmp/magnetic_ground_truth.np', robot_height=40, width=800, height=600,
-                 start_point=(0, 0, 0)):
+                 start_point=(0, 0, 0), message='experiment default message...'):
         self.debug = False
         self.animator = None
         self.movement_mode = 0
         self.start_point = start_point
         self.robot_height = robot_height
+        self.message = message
+
+        self.start_time = int(time.time() * 1000)
 
         self.width = width
         self.height = height
@@ -215,8 +218,8 @@ class PathBatterySimulator(object):
         #print v
 
         engine = mlab.get_engine()
-        s = engine.current_scene
-        s.scene.interactor.add_observer('KeyPressEvent', self.keypress_callback)
+        self.s = engine.current_scene
+        self.s.scene.interactor.add_observer('KeyPressEvent', self.keypress_callback)
 
         self.robots = []
 
@@ -230,7 +233,13 @@ class PathBatterySimulator(object):
             ball.y = self.start_point[1]
             ball.z = self.start_point[2]
 
-            curve = visual.curve(color=color, radius=PathBatterySimulator.curve_radius)
+            r, g, b = color
+            rt = r + (0.25 * (1 - r))
+            gt = g + (0.25 * (1 - g))
+            bt = b + (0.25 * (1 - b))
+            curve_color = (rt, gt, bt)
+
+            curve = visual.curve(color=curve_color, radius=PathBatterySimulator.curve_radius)
 
             r_ball = RobotBall(key, local_hex_list, hex_list['external_routes'][key], ball, curve)
             self.robots.append(r_ball)
@@ -269,11 +278,13 @@ class PathBatterySimulator(object):
         pass
 
     def animate(self):
+        print "Animating...\n"
         end_counter = 0
-
         for i in xrange(len(self.robots)):
             robot = self.robots[i]
             robot.update_pos()
+
+            print robot.get_id(), robot.get_status()
 
             if robot.get_status() == RobotBall.STATUS_END or robot.get_status() == RobotBall.STATUS_DAMAGED:
                 end_counter += 1
@@ -281,6 +292,8 @@ class PathBatterySimulator(object):
                 self.master_cmd.receive_keepalive(robot.get_id())
 
         dead_r, alive_r = self.master_cmd.check_alive()
+
+        print "dead", dead_r, "alive", alive_r, "n robots", len(self.robots), "end_counter", end_counter
 
         if len(dead_r) > 0:
             print "dead", dead_r, "alive", alive_r
@@ -299,11 +312,19 @@ class PathBatterySimulator(object):
         else:
             if end_counter >= len(self.robots):
                 print "Exiting path simulation..."
-                #mlab.close(all=True)
+
+                # -------------------
+                with open("/tmp/exp_results.txt", "a") as myfile:
+                    end_time = int(time.time() * 1000) - self.start_time
+                    myfile.write(self.message + " " + str(end_time))
+                    myfile.write("\n")
+                # -------------------
+
                 self.animator.itimer.Stop()
+                mlab.close(all=True)
 
     def start_animation(self):
-        self.animator = visual.iterate(60, self.animate)
+        self.animator = visual.iterate(240, self.animate)
         visual.show()
         return self.animator
 
@@ -353,5 +374,5 @@ if __name__ == '__main__':
     }
 
     point_list = point_list_3robots
-    pSim = PathBatterySimulator(point_list)
+    pSim = PathBatterySimulator(point_list, start_point=(0, 0, 0))
     pSim.start_animation()

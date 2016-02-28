@@ -22,7 +22,7 @@ class RobotBall(object):
     STATUS_ENDING = 'ENDING'
 
     def __init__(self, robot_id, hex_internal_list, hex_external_list, ball, hist_curve,
-                 np_file='/tmp/magnetic_ground_truth.np', height=40, battery=4000, debug=True):
+                 np_file='/tmp/magnetic_ground_truth.np', height=40, battery=99999, debug=True):
         self.robot_id = robot_id
         self.debug = debug
         self.status = 'GOING_TO_NEXT_HEX'

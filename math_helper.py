@@ -4,11 +4,23 @@ from shapely.geometry import *
 from shapely import affinity
 import heapq
 import numpy as np
+from scipy.spatial import distance
 
 
-def get_3d_coverage_points(p_list, robot_heigth, np_file):
-    np_mat = np.loadtxt(np_file)
-    np_mat *= 255.0/np_mat.max()
+def get_distance_3d_path(p_list):
+    dst = 0
+    for i in xrange(len(p_list)):
+        d1 = p_list[i]
+        if i+1 < len(p_list):
+            d2 = p_list[i+1]
+            dst += distance.euclidean(d1, d2)
+    return dst
+
+
+def get_3d_coverage_points(p_list, robot_heigth, np_file, np_mat=None):
+    if np_mat is None:
+        np_mat = np.loadtxt(np_file)
+        np_mat *= 255.0/np_mat.max()
     points = []
 
     x_size = np_mat.shape[1]
@@ -299,3 +311,55 @@ def is_number(s):
         return True
     except ValueError:
         return False
+
+
+def get_line_points(p1, p2, step=0):
+        "Bresenham's line algorithm"
+
+        x0 = p1[0]
+        y0 = p1[1]
+        x1 = p2[0]
+        y1 = p2[1]
+
+        points_in_line = []
+        count = 0
+        dx = abs(x1 - x0)
+        dy = abs(y1 - y0)
+        x, y = x0, y0
+        sx = -1 if x0 > x1 else 1
+        sy = -1 if y0 > y1 else 1
+
+        if dx > dy:
+            err = dx / 2.0
+            while x != x1:
+                if count >= step:
+                    points_in_line.append((x, y))
+                    count = 0
+                else:
+                    count += 1
+                err -= dy
+                if err < 0:
+                    y += sy
+                    err += dx
+                x += sx
+        else:
+            err = dy / 2.0
+            while y != y1:
+                if count >= step:
+                    points_in_line.append((x, y))
+                    count = 0
+                else:
+                    count += 1
+                err -= dx
+                if err < 0:
+                    x += sx
+                    err += dy
+                y += sy
+
+        if count >= step:
+            points_in_line.append((x, y))
+            count = 0
+        else:
+            count += 1
+
+        return points_in_line

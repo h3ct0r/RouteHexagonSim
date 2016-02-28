@@ -39,6 +39,8 @@ class MouseManager(object):
 
         self.button_more_height = buttons.Button()
         self.button_less_height = buttons.Button()
+
+        self.draw_buttons()
         pass
 
     def draw_buttons(self):

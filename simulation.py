@@ -7,7 +7,7 @@ from math import degrees
 from shutil import copyfile
 
 import numpy as np
-from animation import path_robust_simulator
+from animation import path_battery_simulator
 import pygame
 from matplotlib import pyplot as plt
 from shapely import affinity
@@ -102,8 +102,6 @@ class Sim(object):
         self.battery_autonomy = config.BATTERY_AUTONOMY
         self.line_width = config.LINE_WIDTH
 
-        self.mouse_manager = mouse_manager.MouseManager(self)
-
         self.point_list = []
         self.hex_intersection = []
         self.adjacency_dict = {}
@@ -147,6 +145,7 @@ class Sim(object):
 
         # Update the latest background
         self.load_background()
+        self.mouse_manager = mouse_manager.MouseManager(self)
 
     def start(self):
         if self.debug:
@@ -171,7 +170,7 @@ class Sim(object):
             print "Background image does not exists:", config.NP_GROUND_TRUTH
         pass
 
-    def run_3d_sim(self):
+    def run_3d_sim(self, message="default msg"):
         if 'robots' in self.robot_waypoints:
             # p_list = []
             #
@@ -219,8 +218,12 @@ class Sim(object):
             start_pt = math_helper.get_3d_point(
                 self.trajectory_start_pt, self.robot_base_height, config.NP_GROUND_TRUTH)
 
-            p_sim = path_robust_simulator.PathRobustSimulator(sim_hex_data, robot_height=self.robot_base_height,
-                                                              start_point=start_pt)
+            # p_sim = path_robust_simulator.PathRobustSimulator(sim_hex_data, robot_height=self.robot_base_height,
+            #                                                   start_point=start_pt)
+            # p_sim.start_animation()
+
+            p_sim = path_battery_simulator.PathBatterySimulator(
+                sim_hex_data, robot_height=self.robot_base_height, start_point=start_pt, message=message)
             p_sim.start_animation()
 
         else:
@@ -281,7 +284,17 @@ class Sim(object):
 
                 elif (event.type == pygame.KEYDOWN) and (event.key == pygame.K_1):
                     self.redraw = True
-                    self.run_3d_sim()
+
+                    #self.run_3d_sim()
+
+                    for i in xrange(1, 9):
+                        for j in xrange(5):
+                            self.number_of_robots = i
+                            message = "Exp:" + str(self.number_of_robots) + " robots"
+                            print message
+
+                            self.do_simulation()
+                            self.run_3d_sim(message=message)
 
                 elif (event.type == pygame.KEYDOWN) and (event.key == pygame.K_2):
                     self.redraw = True
